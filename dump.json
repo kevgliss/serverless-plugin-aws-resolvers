@@ -1,0 +1,1165 @@
+[
+  {
+    "__docId__": 0,
+    "kind": "file",
+    "name": "src/index.js",
+    "content": "import _ from 'lodash'\nimport AWS from 'aws-sdk'\nimport winston from 'winston'\n\nconst AWS_PREFIX = 'aws'\n\n/**\n * @param key the name of the ElasticSearch cluster to resolve\n * @param awsParameters parameters to pass to the AWS.ES constructor\n * @returns {Promise<AWS.ES.ElasticsearchDomainStatus>}\n * @see http://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/ES.html#describeElasticsearchDomain-property\n */\nasync function getESSValue(key, awsParameters) {\n  winston.debug(`Resolving ElasticSearch cluster with name ${key}`)\n  const ess = new AWS.ES({ ...awsParameters, apiVersion: '2015-01-01' })\n  const result = await ess.describeElasticsearchDomain({ DomainName: key }).promise()\n  if (!result || !result.DomainStatus) {\n    throw new Error(`Could not find ElasticSearch cluster with name ${key}`)\n  }\n\n  return result.DomainStatus\n}\n\n/**\n * @param key the name of the Kinesis stream to resolve\n * @param awsParameters parameters to pass to the AWS.Kinesis constructor\n * @returns {Promise<AWS.Kinesis.StreamDescription>}\n * @see http://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/Kinesis.html#describeStream-property\n */\nasync function getKinesisValue(key, awsParameters) {\n  winston.debug(`Resolving Kinesis stream with name ${key}`)\n  const kinesis = new AWS.Kinesis({ ...awsParameters, apiVersion: '2013-12-02' })\n  const result = await kinesis.describeStream({ StreamName: key }).promise()\n  return result.StreamDescription\n}\n\n/**\n * @param key the name of the RDS instance to resolve\n * @param awsParameters parameters to pass to the AWS.RDS constructor\n * @returns {Promise.<AWS.RDS.DBInstance>}\n * @see http://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/RDS.html#describeDBInstances-property\n */\nasync function getRDSValue(key, awsParameters) {\n  winston.debug(`Resolving RDS database with name ${key}`)\n  const rds = new AWS.RDS({ ...awsParameters, apiVersion: '2014-10-31' })\n  const result = await rds.describeDBInstances({ DBInstanceIdentifier: key }).promise()\n  if (!result) {\n    throw new Error(`Could Not find any databases with identifier ${key}`)\n  }\n  // Parse out the instances\n  const instances = result.DBInstances\n\n  if (instances.length !== 1) {\n    throw new Error(`Expected exactly one DB instance for key ${key}. Got ${Object.keys(instances)}`)\n  }\n\n  return instances[0]\n}\n\nconst AWS_HANDLERS = {\n  ess: getESSValue,\n  kinesis: getKinesisValue,\n  rds: getRDSValue\n}\n\nconst AWS_PATTERN = /^aws:\\w+:[\\w-]+:\\w+$/\n\n/**\n * @param variableString the variable to resolve\n * @param region the AWS region to use\n * @returns {Promise.<String>} a promise for the resolved variable\n * @example const myResolvedVariable = await getValueFromAws('aws:kinesis:my-stream:StreamARN', 'us-east-1')\n */\nasync function getValueFromAws(variableString, region) {\n  // The format is aws:${service}:${key}:${request}. eg.: aws:kinesis:stream-name:StreamARN\n  // Validate the input format\n  if (!variableString.match(AWS_PATTERN)) {\n    throw new Error(`Invalid AWS format for variable ${variableString}`)\n  }\n\n  const rest = variableString.split(`${AWS_PREFIX}:`)[1]\n  for (const service of Object.keys(AWS_HANDLERS)) {\n    if (rest.startsWith(`${service}:`)) {\n      const commonParameters = {}\n      if (region) {\n        commonParameters.region = region\n      }\n\n      // Parse out the key and request\n      const [key, request] = rest.split(`${service}:`)[1].split(':')\n      const description = await AWS_HANDLERS[service](key, commonParameters) // eslint-disable-line no-await-in-loop, max-len\n      // Validate that the desired property exists\n      if (!_.has(description, request)) {\n        throw new Error(`Error resolving ${variableString}. Key '${request}' not found. Candidates are ${Object.keys(description)}`)\n      }\n\n      return _.get(description, request)\n    }\n  }\n\n  throw new TypeError(`Cannot parse AWS type from ${rest}`)\n}\n\n/**\n * A plugin for the serverless framework that allows resolution of deployed AWS services into variable names\n */\nclass ServerlessAWSResolvers {\n  constructor(serverless, options) {\n    this.provider = 'aws'\n\n    this.commands = {\n      resolveAwsKey: {\n        usage: `Resolves an AWS key (Supported prefixes: ${Object.keys(AWS_HANDLERS)})`,\n        lifecycleEvents: ['run'],\n        options: {\n          key: {\n            usage: 'The key to resolve',\n            shortcut: 'k'\n          }\n        }\n      }\n    }\n\n    this.hooks = {\n      'resolveAwsKey:run': () => getValueFromAws(options.key, serverless.service.provider.region)\n        .then(JSON.stringify)\n        .then(_.bind(serverless.cli.log, serverless.cli))\n    }\n\n    const delegate = _.bind(serverless.variables.getValueFromSource, serverless.variables)\n    serverless.variables.getValueFromSource = function getValueFromSource(variableString) { // eslint-disable-line no-param-reassign, max-len\n      const region = serverless.service.provider.region\n      if (!region) {\n        throw new Error('Cannot hydrate AWS variables without a region')\n      }\n      if (variableString.startsWith(`${AWS_PREFIX}:`)) {\n        return getValueFromAws(variableString, region)\n      }\n\n      return delegate(variableString)\n    }\n  }\n}\n\nmodule.exports = ServerlessAWSResolvers\n",
+    "static": true,
+    "longname": "src/index.js",
+    "access": null,
+    "description": null,
+    "lineNumber": 1
+  },
+  {
+    "__docId__": 1,
+    "kind": "variable",
+    "name": "AWS_PREFIX",
+    "memberof": "src/index.js",
+    "static": true,
+    "longname": "src/index.js~AWS_PREFIX",
+    "access": null,
+    "export": false,
+    "importPath": "serverless-plugin-aws-resolvers/src/index.js",
+    "importStyle": null,
+    "description": null,
+    "lineNumber": 5,
+    "undocument": true,
+    "unknown": [
+      {
+        "tagName": "@_undocument",
+        "tagValue": ""
+      }
+    ],
+    "type": {
+      "types": [
+        "string"
+      ]
+    }
+  },
+  {
+    "__docId__": 2,
+    "kind": "function",
+    "name": "getESSValue",
+    "memberof": "src/index.js",
+    "generator": false,
+    "async": true,
+    "static": true,
+    "longname": "src/index.js~getESSValue",
+    "access": null,
+    "export": false,
+    "importPath": "serverless-plugin-aws-resolvers/src/index.js",
+    "importStyle": null,
+    "description": "",
+    "see": [
+      "http://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/ES.html#describeElasticsearchDomain-property"
+    ],
+    "lineNumber": 13,
+    "unknown": [
+      {
+        "tagName": "@returns",
+        "tagValue": "{Promise<AWS.ES.ElasticsearchDomainStatus>}"
+      }
+    ],
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "*"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "key",
+        "description": "the name of the ElasticSearch cluster to resolve"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "*"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "awsParameters",
+        "description": "parameters to pass to the AWS.ES constructor"
+      }
+    ],
+    "return": {
+      "nullable": null,
+      "types": [
+        "Promise<AWS.ES.ElasticsearchDomainStatus>"
+      ],
+      "spread": false,
+      "description": ""
+    }
+  },
+  {
+    "__docId__": 3,
+    "kind": "function",
+    "name": "getKinesisValue",
+    "memberof": "src/index.js",
+    "generator": false,
+    "async": true,
+    "static": true,
+    "longname": "src/index.js~getKinesisValue",
+    "access": null,
+    "export": false,
+    "importPath": "serverless-plugin-aws-resolvers/src/index.js",
+    "importStyle": null,
+    "description": "",
+    "see": [
+      "http://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/Kinesis.html#describeStream-property"
+    ],
+    "lineNumber": 30,
+    "unknown": [
+      {
+        "tagName": "@returns",
+        "tagValue": "{Promise<AWS.Kinesis.StreamDescription>}"
+      }
+    ],
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "*"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "key",
+        "description": "the name of the Kinesis stream to resolve"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "*"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "awsParameters",
+        "description": "parameters to pass to the AWS.Kinesis constructor"
+      }
+    ],
+    "return": {
+      "nullable": null,
+      "types": [
+        "Promise<AWS.Kinesis.StreamDescription>"
+      ],
+      "spread": false,
+      "description": ""
+    }
+  },
+  {
+    "__docId__": 4,
+    "kind": "function",
+    "name": "getRDSValue",
+    "memberof": "src/index.js",
+    "generator": false,
+    "async": true,
+    "static": true,
+    "longname": "src/index.js~getRDSValue",
+    "access": null,
+    "export": false,
+    "importPath": "serverless-plugin-aws-resolvers/src/index.js",
+    "importStyle": null,
+    "description": "",
+    "see": [
+      "http://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/RDS.html#describeDBInstances-property"
+    ],
+    "lineNumber": 43,
+    "unknown": [
+      {
+        "tagName": "@returns",
+        "tagValue": "{Promise.<AWS.RDS.DBInstance>}"
+      }
+    ],
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "*"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "key",
+        "description": "the name of the RDS instance to resolve"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "*"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "awsParameters",
+        "description": "parameters to pass to the AWS.RDS constructor"
+      }
+    ],
+    "return": {
+      "nullable": null,
+      "types": [
+        "Promise.<AWS.RDS.DBInstance>"
+      ],
+      "spread": false,
+      "description": ""
+    }
+  },
+  {
+    "__docId__": 5,
+    "kind": "variable",
+    "name": "AWS_HANDLERS",
+    "memberof": "src/index.js",
+    "static": true,
+    "longname": "src/index.js~AWS_HANDLERS",
+    "access": null,
+    "export": false,
+    "importPath": "serverless-plugin-aws-resolvers/src/index.js",
+    "importStyle": null,
+    "description": null,
+    "lineNumber": 60,
+    "undocument": true,
+    "unknown": [
+      {
+        "tagName": "@_undocument",
+        "tagValue": ""
+      }
+    ],
+    "type": {
+      "types": [
+        "{\"ess\": *, \"kinesis\": *, \"rds\": *}"
+      ]
+    }
+  },
+  {
+    "__docId__": 6,
+    "kind": "variable",
+    "name": "AWS_PATTERN",
+    "memberof": "src/index.js",
+    "static": true,
+    "longname": "src/index.js~AWS_PATTERN",
+    "access": null,
+    "export": false,
+    "importPath": "serverless-plugin-aws-resolvers/src/index.js",
+    "importStyle": null,
+    "description": null,
+    "lineNumber": 66,
+    "undocument": true,
+    "unknown": [
+      {
+        "tagName": "@_undocument",
+        "tagValue": ""
+      }
+    ],
+    "type": {
+      "types": [
+        "undefined"
+      ]
+    }
+  },
+  {
+    "__docId__": 7,
+    "kind": "function",
+    "name": "getValueFromAws",
+    "memberof": "src/index.js",
+    "generator": false,
+    "async": true,
+    "static": true,
+    "longname": "src/index.js~getValueFromAws",
+    "access": null,
+    "export": false,
+    "importPath": "serverless-plugin-aws-resolvers/src/index.js",
+    "importStyle": null,
+    "description": "",
+    "examples": [
+      "const myResolvedVariable = await getValueFromAws('aws:kinesis:my-stream:StreamARN', 'us-east-1')"
+    ],
+    "lineNumber": 74,
+    "unknown": [
+      {
+        "tagName": "@returns",
+        "tagValue": "{Promise.<String>} a promise for the resolved variable"
+      }
+    ],
+    "params": [
+      {
+        "nullable": null,
+        "types": [
+          "*"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "variableString",
+        "description": "the variable to resolve"
+      },
+      {
+        "nullable": null,
+        "types": [
+          "*"
+        ],
+        "spread": false,
+        "optional": false,
+        "name": "region",
+        "description": "the AWS region to use"
+      }
+    ],
+    "return": {
+      "nullable": null,
+      "types": [
+        "Promise.<String>"
+      ],
+      "spread": false,
+      "description": "a promise for the resolved variable"
+    }
+  },
+  {
+    "__docId__": 8,
+    "kind": "class",
+    "name": "ServerlessAWSResolvers",
+    "memberof": "src/index.js",
+    "static": true,
+    "longname": "src/index.js~ServerlessAWSResolvers",
+    "access": null,
+    "export": false,
+    "importPath": "serverless-plugin-aws-resolvers/src/index.js",
+    "importStyle": null,
+    "description": "A plugin for the serverless framework that allows resolution of deployed AWS services into variable names",
+    "lineNumber": 107,
+    "interface": false
+  },
+  {
+    "__docId__": 9,
+    "kind": "constructor",
+    "name": "constructor",
+    "memberof": "src/index.js~ServerlessAWSResolvers",
+    "generator": false,
+    "async": false,
+    "static": false,
+    "longname": "src/index.js~ServerlessAWSResolvers#constructor",
+    "access": null,
+    "description": null,
+    "lineNumber": 108,
+    "undocument": true,
+    "unknown": [
+      {
+        "tagName": "@_undocument",
+        "tagValue": ""
+      }
+    ],
+    "params": [
+      {
+        "name": "serverless",
+        "types": [
+          "*"
+        ]
+      },
+      {
+        "name": "options",
+        "types": [
+          "*"
+        ]
+      }
+    ]
+  },
+  {
+    "__docId__": 10,
+    "kind": "member",
+    "name": "provider",
+    "memberof": "src/index.js~ServerlessAWSResolvers",
+    "static": false,
+    "longname": "src/index.js~ServerlessAWSResolvers#provider",
+    "access": null,
+    "description": null,
+    "lineNumber": 109,
+    "undocument": true,
+    "unknown": [
+      {
+        "tagName": "@_undocument",
+        "tagValue": ""
+      }
+    ],
+    "type": {
+      "types": [
+        "string"
+      ]
+    }
+  },
+  {
+    "__docId__": 11,
+    "kind": "member",
+    "name": "commands",
+    "memberof": "src/index.js~ServerlessAWSResolvers",
+    "static": false,
+    "longname": "src/index.js~ServerlessAWSResolvers#commands",
+    "access": null,
+    "description": null,
+    "lineNumber": 111,
+    "undocument": true,
+    "unknown": [
+      {
+        "tagName": "@_undocument",
+        "tagValue": ""
+      }
+    ],
+    "type": {
+      "types": [
+        "{\"resolveAwsKey\": *}"
+      ]
+    }
+  },
+  {
+    "__docId__": 12,
+    "kind": "member",
+    "name": "hooks",
+    "memberof": "src/index.js~ServerlessAWSResolvers",
+    "static": false,
+    "longname": "src/index.js~ServerlessAWSResolvers#hooks",
+    "access": null,
+    "description": null,
+    "lineNumber": 124,
+    "undocument": true,
+    "unknown": [
+      {
+        "tagName": "@_undocument",
+        "tagValue": ""
+      }
+    ],
+    "type": {
+      "types": [
+        "{\"resolveAwsKey:run\": *}"
+      ]
+    }
+  },
+  {
+    "__docId__": 14,
+    "kind": "external",
+    "name": "Infinity",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Infinity",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Infinity",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 15,
+    "kind": "external",
+    "name": "NaN",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/NaN",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~NaN",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 16,
+    "kind": "external",
+    "name": "undefined",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/undefined",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~undefined",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 17,
+    "kind": "external",
+    "name": "null",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/null",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~null",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 18,
+    "kind": "external",
+    "name": "Object",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Object",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 19,
+    "kind": "external",
+    "name": "object",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~object",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 20,
+    "kind": "external",
+    "name": "Function",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Function",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 21,
+    "kind": "external",
+    "name": "function",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~function",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 22,
+    "kind": "external",
+    "name": "Boolean",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Boolean",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Boolean",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 23,
+    "kind": "external",
+    "name": "boolean",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Boolean",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~boolean",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 24,
+    "kind": "external",
+    "name": "Symbol",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Symbol",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 25,
+    "kind": "external",
+    "name": "Error",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Error",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 26,
+    "kind": "external",
+    "name": "EvalError",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/EvalError",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~EvalError",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 27,
+    "kind": "external",
+    "name": "InternalError",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/InternalError",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~InternalError",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 28,
+    "kind": "external",
+    "name": "RangeError",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RangeError",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~RangeError",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 29,
+    "kind": "external",
+    "name": "ReferenceError",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ReferenceError",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~ReferenceError",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 30,
+    "kind": "external",
+    "name": "SyntaxError",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SyntaxError",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~SyntaxError",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 31,
+    "kind": "external",
+    "name": "TypeError",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypeError",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~TypeError",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 32,
+    "kind": "external",
+    "name": "URIError",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/URIError",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~URIError",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 33,
+    "kind": "external",
+    "name": "Number",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Number",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 34,
+    "kind": "external",
+    "name": "number",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~number",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 35,
+    "kind": "external",
+    "name": "Date",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Date",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 36,
+    "kind": "external",
+    "name": "String",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~String",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 37,
+    "kind": "external",
+    "name": "string",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~string",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 38,
+    "kind": "external",
+    "name": "RegExp",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~RegExp",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 39,
+    "kind": "external",
+    "name": "Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Array",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 40,
+    "kind": "external",
+    "name": "Int8Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Int8Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Int8Array",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 41,
+    "kind": "external",
+    "name": "Uint8Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Uint8Array",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 42,
+    "kind": "external",
+    "name": "Uint8ClampedArray",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint8ClampedArray",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Uint8ClampedArray",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 43,
+    "kind": "external",
+    "name": "Int16Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Int16Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Int16Array",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 44,
+    "kind": "external",
+    "name": "Uint16Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint16Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Uint16Array",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 45,
+    "kind": "external",
+    "name": "Int32Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Int32Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Int32Array",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 46,
+    "kind": "external",
+    "name": "Uint32Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Uint32Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Uint32Array",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 47,
+    "kind": "external",
+    "name": "Float32Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Float32Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Float32Array",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 48,
+    "kind": "external",
+    "name": "Float64Array",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Float64Array",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Float64Array",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 49,
+    "kind": "external",
+    "name": "Map",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Map",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 50,
+    "kind": "external",
+    "name": "Set",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Set",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 51,
+    "kind": "external",
+    "name": "WeakMap",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakMap",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~WeakMap",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 52,
+    "kind": "external",
+    "name": "WeakSet",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakSet",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~WeakSet",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 53,
+    "kind": "external",
+    "name": "ArrayBuffer",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~ArrayBuffer",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 54,
+    "kind": "external",
+    "name": "DataView",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~DataView",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 55,
+    "kind": "external",
+    "name": "JSON",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~JSON",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 56,
+    "kind": "external",
+    "name": "Promise",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Promise",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 57,
+    "kind": "external",
+    "name": "Generator",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Generator",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Generator",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 58,
+    "kind": "external",
+    "name": "GeneratorFunction",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/GeneratorFunction",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~GeneratorFunction",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 59,
+    "kind": "external",
+    "name": "Reflect",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Reflect",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 60,
+    "kind": "external",
+    "name": "Proxy",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy",
+    "memberof": "BuiltinExternal/ECMAScriptExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/ECMAScriptExternal.js~Proxy",
+    "access": null,
+    "description": "",
+    "lineNumber": 193,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 62,
+    "kind": "external",
+    "name": "CanvasRenderingContext2D",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/WebAPIExternal.js~CanvasRenderingContext2D",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 63,
+    "kind": "external",
+    "name": "DocumentFragment",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/API/DocumentFragment",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/WebAPIExternal.js~DocumentFragment",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 64,
+    "kind": "external",
+    "name": "Element",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/API/Element",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/WebAPIExternal.js~Element",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 65,
+    "kind": "external",
+    "name": "Event",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/API/Event",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/WebAPIExternal.js~Event",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 66,
+    "kind": "external",
+    "name": "Node",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/API/Node",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/WebAPIExternal.js~Node",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 67,
+    "kind": "external",
+    "name": "NodeList",
+    "externalLink": "https://developer.mozilla.org/en-US/docs/Web/API/NodeList",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/WebAPIExternal.js~NodeList",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 68,
+    "kind": "external",
+    "name": "XMLHttpRequest",
+    "externalLink": "https://developer.mozilla.org/en/docs/Web/API/XMLHttpRequest",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/WebAPIExternal.js~XMLHttpRequest",
+    "access": null,
+    "description": "",
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 69,
+    "kind": "external",
+    "name": "AudioContext",
+    "externalLink": "https://developer.mozilla.org/en/docs/Web/API/AudioContext",
+    "memberof": "BuiltinExternal/WebAPIExternal.js",
+    "static": true,
+    "longname": "BuiltinExternal/WebAPIExternal.js~AudioContext",
+    "access": null,
+    "description": "",
+    "lineNumber": 34,
+    "builtinExternal": true
+  },
+  {
+    "__docId__": 70,
+    "kind": "testFile",
+    "name": "test/index.spec.js",
+    "content": "/**\n * Created by msills on 4/12/17.\n */\n\nimport AWS from 'aws-sdk-mock'\nimport assert from 'assert'\nimport { expect } from 'chai'\nimport Serverless from 'serverless'\nimport ServerlessAWSResolvers from '../src'\n\ndescribe('ServerlessAWSResolvers', () => {\n  const DEFAULT_VALUE = 'MY_VARIABLE_NAME'\n\n  const CONFIGS = {\n    KINESIS: { scope: 'kinesis', service: 'Kinesis', method: 'describeStream', topLevel: 'StreamDescription' },\n    ESS: { scope: 'ess', service: 'ES', method: 'describeElasticsearchDomain', topLevel: 'DomainStatus' },\n    RDS: {\n      scope: 'rds',\n      service: 'RDS',\n      method: 'describeDBInstances',\n      topLevel: 'DBInstances',\n      testKey: 'testKey',\n      testValue: 'test-value',\n      serviceValue: [{ testKey: 'test-value' }]\n    }\n  }\n\n  afterEach(() => {\n    AWS.restore()\n  })\n\n  function createFakeServerless() {\n    const sls = new Serverless()\n    // Attach the plugin\n    sls.pluginManager.addPlugin(ServerlessAWSResolvers)\n    sls.init()\n    return sls\n  }\n\n  async function testResolve({ scope, service, method, topLevel, testKey, testValue, serviceValue }) {\n    testKey = testKey || 'TEST_KEY'\n    testValue = testValue || 'TEST_VALUE'\n    if (!serviceValue) {\n      serviceValue = {}\n      serviceValue[testKey] = testValue\n    }\n\n    const serverless = createFakeServerless()\n\n    AWS.mock(service, method, (params, callback) => {\n      const result = {}\n      result[topLevel] = serviceValue\n      callback(null, result)\n    })\n\n    serverless.service.custom.myVariable = `\\${aws:${scope}:test-name:${testKey}}`\n    await serverless.variables.populateService()\n    assert.equal(serverless.service.custom.myVariable, testValue)\n  }\n\n  function testNotFound({ scope, service, method }) {\n    const serverless = createFakeServerless()\n\n    AWS.mock(service, method, (params, callback) => {\n      callback(new Error('Not found'))\n    })\n\n    serverless.service.custom.myVariable = `\\${aws:${scope}:test-name:TEST_KEY}`\n    expect(serverless.variables.populateService).to.throw(Error)\n  }\n\n  it('should pass through non-AWS variables', async () => {\n    const serverless = createFakeServerless()\n    serverless.service.custom.myVar = DEFAULT_VALUE\n    await serverless.variables.populateService()\n    assert.equal(serverless.service.custom.myVar, DEFAULT_VALUE)\n  })\n\n  for (const service of Object.keys(CONFIGS)) {\n    it(`should resolve ${service}`, () => { testResolve(CONFIGS[service]) })\n    it(`should throw for ${service} not found`, () => { testNotFound(CONFIGS[service]) })\n  }\n\n  it('should throw for keys that are not present', () => {\n    const serverless = createFakeServerless()\n\n    AWS.mock('Kinesis', 'describeStream', (params, callback) => {\n      callback(null, { StreamDescription: { StreamARN: DEFAULT_VALUE } })\n    })\n\n    serverless.service.custom.foo = '${aws:kinesis:test-stream:BAD_KEY}' // eslint-disable-line\n    expect(serverless.variables.populateService).to.throw(Error)\n  })\n})\n",
+    "static": true,
+    "longname": "test/index.spec.js",
+    "access": null,
+    "description": null,
+    "lineNumber": 1
+  },
+  {
+    "__docId__": 71,
+    "kind": "testDescribe",
+    "name": "describe0",
+    "testId": 0,
+    "memberof": "test/index.spec.js",
+    "testDepth": 0,
+    "static": true,
+    "longname": "test/index.spec.js~describe0",
+    "access": null,
+    "description": "ServerlessAWSResolvers",
+    "lineNumber": 11
+  },
+  {
+    "__docId__": 72,
+    "kind": "testIt",
+    "name": "it1",
+    "testId": 1,
+    "memberof": "test/index.spec.js~describe0",
+    "testDepth": 1,
+    "static": true,
+    "longname": "test/index.spec.js~describe0.it1",
+    "access": null,
+    "description": "should pass through non-AWS variables",
+    "lineNumber": 72
+  },
+  {
+    "__docId__": 73,
+    "kind": "testIt",
+    "name": "it2",
+    "testId": 2,
+    "memberof": "test/index.spec.js~describe0",
+    "testDepth": 1,
+    "static": true,
+    "longname": "test/index.spec.js~describe0.it2",
+    "access": null,
+    "lineNumber": 80
+  },
+  {
+    "__docId__": 74,
+    "kind": "testIt",
+    "name": "it3",
+    "testId": 3,
+    "memberof": "test/index.spec.js~describe0",
+    "testDepth": 1,
+    "static": true,
+    "longname": "test/index.spec.js~describe0.it3",
+    "access": null,
+    "lineNumber": 81
+  },
+  {
+    "__docId__": 75,
+    "kind": "testIt",
+    "name": "it4",
+    "testId": 4,
+    "memberof": "test/index.spec.js~describe0",
+    "testDepth": 1,
+    "static": true,
+    "longname": "test/index.spec.js~describe0.it4",
+    "access": null,
+    "description": "should throw for keys that are not present",
+    "lineNumber": 84
+  }
+]

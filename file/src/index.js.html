@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <base data-ice="baseUrl" href="../../">
+  <title data-ice="title">src/index.js | API Document</title>
+  <link type="text/css" rel="stylesheet" href="css/style.css">
+  <link type="text/css" rel="stylesheet" href="css/prettify-tomorrow.css">
+  <script src="script/prettify/prettify.js"></script>
+  
+  
+  <script src="script/manual.js"></script>
+</head>
+<body class="layout-container" data-ice="rootContainer">
+
+<header>
+  <a href="./">Home</a>
+  
+  <a href="identifiers.html">Reference</a>
+  <a href="source.html">Source</a>
+  <a href="test.html" data-ice="testLink">Test</a>
+  <a data-ice="repoURL" href="https://github.com/DopplerLabs/serverless-plugin-aws-resolvers" class="repo-url-github">Repository</a>
+  <div class="search-box">
+  <span>
+    <img src="./image/search.png">
+    <span class="search-input-edge"></span><input class="search-input"><span class="search-input-edge"></span>
+  </span>
+    <ul class="search-result"></ul>
+  </div>
+</header>
+
+<nav class="navigation" data-ice="nav"><div>
+  <ul>
+    
+  <li data-ice="doc"><span data-ice="kind" class="kind-class">C</span><span data-ice="name"><span><a href="class/src/index.js~ServerlessAWSResolvers.html">ServerlessAWSResolvers</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-function">F</span><span data-ice="name"><span><a href="function/index.html#static-function-getESSValue">getESSValue</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-function">F</span><span data-ice="name"><span><a href="function/index.html#static-function-getKinesisValue">getKinesisValue</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-function">F</span><span data-ice="name"><span><a href="function/index.html#static-function-getRDSValue">getRDSValue</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-function">F</span><span data-ice="name"><span><a href="function/index.html#static-function-getValueFromAws">getValueFromAws</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-variable">V</span><span data-ice="name"><span><a href="variable/index.html#static-variable-AWS_HANDLERS">AWS_HANDLERS</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-variable">V</span><span data-ice="name"><span><a href="variable/index.html#static-variable-AWS_PATTERN">AWS_PATTERN</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-variable">V</span><span data-ice="name"><span><a href="variable/index.html#static-variable-AWS_PREFIX">AWS_PREFIX</a></span></span></li>
+</ul>
+</div>
+</nav>
+
+<div class="content" data-ice="content"><h1 data-ice="title">src/index.js</h1>
+<pre class="source-code line-number raw-source-code"><code class="prettyprint linenums" data-ice="content">import _ from &apos;lodash&apos;
+import AWS from &apos;aws-sdk&apos;
+import winston from &apos;winston&apos;
+
+const AWS_PREFIX = &apos;aws&apos;
+
+/**
+ * @param key the name of the ElasticSearch cluster to resolve
+ * @param awsParameters parameters to pass to the AWS.ES constructor
+ * @returns {Promise&lt;AWS.ES.ElasticsearchDomainStatus&gt;}
+ * @see http://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/ES.html#describeElasticsearchDomain-property
+ */
+async function getESSValue(key, awsParameters) {
+  winston.debug(`Resolving ElasticSearch cluster with name ${key}`)
+  const ess = new AWS.ES({ ...awsParameters, apiVersion: &apos;2015-01-01&apos; })
+  const result = await ess.describeElasticsearchDomain({ DomainName: key }).promise()
+  if (!result || !result.DomainStatus) {
+    throw new Error(`Could not find ElasticSearch cluster with name ${key}`)
+  }
+
+  return result.DomainStatus
+}
+
+/**
+ * @param key the name of the Kinesis stream to resolve
+ * @param awsParameters parameters to pass to the AWS.Kinesis constructor
+ * @returns {Promise&lt;AWS.Kinesis.StreamDescription&gt;}
+ * @see http://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/Kinesis.html#describeStream-property
+ */
+async function getKinesisValue(key, awsParameters) {
+  winston.debug(`Resolving Kinesis stream with name ${key}`)
+  const kinesis = new AWS.Kinesis({ ...awsParameters, apiVersion: &apos;2013-12-02&apos; })
+  const result = await kinesis.describeStream({ StreamName: key }).promise()
+  return result.StreamDescription
+}
+
+/**
+ * @param key the name of the RDS instance to resolve
+ * @param awsParameters parameters to pass to the AWS.RDS constructor
+ * @returns {Promise.&lt;AWS.RDS.DBInstance&gt;}
+ * @see http://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/RDS.html#describeDBInstances-property
+ */
+async function getRDSValue(key, awsParameters) {
+  winston.debug(`Resolving RDS database with name ${key}`)
+  const rds = new AWS.RDS({ ...awsParameters, apiVersion: &apos;2014-10-31&apos; })
+  const result = await rds.describeDBInstances({ DBInstanceIdentifier: key }).promise()
+  if (!result) {
+    throw new Error(`Could Not find any databases with identifier ${key}`)
+  }
+  // Parse out the instances
+  const instances = result.DBInstances
+
+  if (instances.length !== 1) {
+    throw new Error(`Expected exactly one DB instance for key ${key}. Got ${Object.keys(instances)}`)
+  }
+
+  return instances[0]
+}
+
+const AWS_HANDLERS = {
+  ess: getESSValue,
+  kinesis: getKinesisValue,
+  rds: getRDSValue
+}
+
+const AWS_PATTERN = /^aws:\w+:[\w-]+:\w+$/
+
+/**
+ * @param variableString the variable to resolve
+ * @param region the AWS region to use
+ * @returns {Promise.&lt;String&gt;} a promise for the resolved variable
+ * @example const myResolvedVariable = await getValueFromAws(&apos;aws:kinesis:my-stream:StreamARN&apos;, &apos;us-east-1&apos;)
+ */
+async function getValueFromAws(variableString, region) {
+  // The format is aws:${service}:${key}:${request}. eg.: aws:kinesis:stream-name:StreamARN
+  // Validate the input format
+  if (!variableString.match(AWS_PATTERN)) {
+    throw new Error(`Invalid AWS format for variable ${variableString}`)
+  }
+
+  const rest = variableString.split(`${AWS_PREFIX}:`)[1]
+  for (const service of Object.keys(AWS_HANDLERS)) {
+    if (rest.startsWith(`${service}:`)) {
+      const commonParameters = {}
+      if (region) {
+        commonParameters.region = region
+      }
+
+      // Parse out the key and request
+      const [key, request] = rest.split(`${service}:`)[1].split(&apos;:&apos;)
+      const description = await AWS_HANDLERS[service](key, commonParameters) // eslint-disable-line no-await-in-loop, max-len
+      // Validate that the desired property exists
+      if (!_.has(description, request)) {
+        throw new Error(`Error resolving ${variableString}. Key &apos;${request}&apos; not found. Candidates are ${Object.keys(description)}`)
+      }
+
+      return _.get(description, request)
+    }
+  }
+
+  throw new TypeError(`Cannot parse AWS type from ${rest}`)
+}
+
+/**
+ * A plugin for the serverless framework that allows resolution of deployed AWS services into variable names
+ */
+class ServerlessAWSResolvers {
+  constructor(serverless, options) {
+    this.provider = &apos;aws&apos;
+
+    this.commands = {
+      resolveAwsKey: {
+        usage: `Resolves an AWS key (Supported prefixes: ${Object.keys(AWS_HANDLERS)})`,
+        lifecycleEvents: [&apos;run&apos;],
+        options: {
+          key: {
+            usage: &apos;The key to resolve&apos;,
+            shortcut: &apos;k&apos;
+          }
+        }
+      }
+    }
+
+    this.hooks = {
+      &apos;resolveAwsKey:run&apos;: () =&gt; getValueFromAws(options.key, serverless.service.provider.region)
+        .then(JSON.stringify)
+        .then(_.bind(serverless.cli.log, serverless.cli))
+    }
+
+    const delegate = _.bind(serverless.variables.getValueFromSource, serverless.variables)
+    serverless.variables.getValueFromSource = function getValueFromSource(variableString) { // eslint-disable-line no-param-reassign, max-len
+      const region = serverless.service.provider.region
+      if (!region) {
+        throw new Error(&apos;Cannot hydrate AWS variables without a region&apos;)
+      }
+      if (variableString.startsWith(`${AWS_PREFIX}:`)) {
+        return getValueFromAws(variableString, region)
+      }
+
+      return delegate(variableString)
+    }
+  }
+}
+
+module.exports = ServerlessAWSResolvers
+</code></pre>
+
+</div>
+
+<footer class="footer">
+  Generated by <a href="https://esdoc.org">ESDoc<span data-ice="esdocVersion">(0.5.2)</span><img src="./image/esdoc-logo-mini-black.png"></a>
+</footer>
+
+<script src="script/search_index.js"></script>
+<script src="script/search.js"></script>
+<script src="script/pretty-print.js"></script>
+<script src="script/inherited-summary.js"></script>
+<script src="script/test-summary.js"></script>
+<script src="script/inner-link.js"></script>
+<script src="script/patch-for-local.js"></script>
+</body>
+</html>

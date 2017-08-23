@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <base data-ice="baseUrl" href="../../">
+  <title data-ice="title">test/index.spec.js | API Document</title>
+  <link type="text/css" rel="stylesheet" href="css/style.css">
+  <link type="text/css" rel="stylesheet" href="css/prettify-tomorrow.css">
+  <script src="script/prettify/prettify.js"></script>
+  
+  
+  <script src="script/manual.js"></script>
+</head>
+<body class="layout-container" data-ice="rootContainer">
+
+<header>
+  <a href="./">Home</a>
+  
+  <a href="identifiers.html">Reference</a>
+  <a href="source.html">Source</a>
+  <a href="test.html" data-ice="testLink">Test</a>
+  <a data-ice="repoURL" href="https://github.com/DopplerLabs/serverless-plugin-aws-resolvers" class="repo-url-github">Repository</a>
+  <div class="search-box">
+  <span>
+    <img src="./image/search.png">
+    <span class="search-input-edge"></span><input class="search-input"><span class="search-input-edge"></span>
+  </span>
+    <ul class="search-result"></ul>
+  </div>
+</header>
+
+<nav class="navigation" data-ice="nav"><div>
+  <ul>
+    
+  <li data-ice="doc"><span data-ice="kind" class="kind-class">C</span><span data-ice="name"><span><a href="class/src/index.js~ServerlessAWSResolvers.html">ServerlessAWSResolvers</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-function">F</span><span data-ice="name"><span><a href="function/index.html#static-function-getESSValue">getESSValue</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-function">F</span><span data-ice="name"><span><a href="function/index.html#static-function-getKinesisValue">getKinesisValue</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-function">F</span><span data-ice="name"><span><a href="function/index.html#static-function-getRDSValue">getRDSValue</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-function">F</span><span data-ice="name"><span><a href="function/index.html#static-function-getValueFromAws">getValueFromAws</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-variable">V</span><span data-ice="name"><span><a href="variable/index.html#static-variable-AWS_HANDLERS">AWS_HANDLERS</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-variable">V</span><span data-ice="name"><span><a href="variable/index.html#static-variable-AWS_PATTERN">AWS_PATTERN</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-variable">V</span><span data-ice="name"><span><a href="variable/index.html#static-variable-AWS_PREFIX">AWS_PREFIX</a></span></span></li>
+</ul>
+</div>
+</nav>
+
+<div class="content" data-ice="content"><h1 data-ice="title">test/index.spec.js</h1>
+<pre class="source-code line-number raw-source-code"><code class="prettyprint linenums" data-ice="content">/**
+ * Created by msills on 4/12/17.
+ */
+
+import AWS from &apos;aws-sdk-mock&apos;
+import assert from &apos;assert&apos;
+import { expect } from &apos;chai&apos;
+import Serverless from &apos;serverless&apos;
+import ServerlessAWSResolvers from &apos;../src&apos;
+
+describe(&apos;ServerlessAWSResolvers&apos;, () =&gt; {
+  const DEFAULT_VALUE = &apos;MY_VARIABLE_NAME&apos;
+
+  const CONFIGS = {
+    KINESIS: { scope: &apos;kinesis&apos;, service: &apos;Kinesis&apos;, method: &apos;describeStream&apos;, topLevel: &apos;StreamDescription&apos; },
+    ESS: { scope: &apos;ess&apos;, service: &apos;ES&apos;, method: &apos;describeElasticsearchDomain&apos;, topLevel: &apos;DomainStatus&apos; },
+    RDS: {
+      scope: &apos;rds&apos;,
+      service: &apos;RDS&apos;,
+      method: &apos;describeDBInstances&apos;,
+      topLevel: &apos;DBInstances&apos;,
+      testKey: &apos;testKey&apos;,
+      testValue: &apos;test-value&apos;,
+      serviceValue: [{ testKey: &apos;test-value&apos; }]
+    }
+  }
+
+  afterEach(() =&gt; {
+    AWS.restore()
+  })
+
+  function createFakeServerless() {
+    const sls = new Serverless()
+    // Attach the plugin
+    sls.pluginManager.addPlugin(ServerlessAWSResolvers)
+    sls.init()
+    return sls
+  }
+
+  async function testResolve({ scope, service, method, topLevel, testKey, testValue, serviceValue }) {
+    testKey = testKey || &apos;TEST_KEY&apos;
+    testValue = testValue || &apos;TEST_VALUE&apos;
+    if (!serviceValue) {
+      serviceValue = {}
+      serviceValue[testKey] = testValue
+    }
+
+    const serverless = createFakeServerless()
+
+    AWS.mock(service, method, (params, callback) =&gt; {
+      const result = {}
+      result[topLevel] = serviceValue
+      callback(null, result)
+    })
+
+    serverless.service.custom.myVariable = `\${aws:${scope}:test-name:${testKey}}`
+    await serverless.variables.populateService()
+    assert.equal(serverless.service.custom.myVariable, testValue)
+  }
+
+  function testNotFound({ scope, service, method }) {
+    const serverless = createFakeServerless()
+
+    AWS.mock(service, method, (params, callback) =&gt; {
+      callback(new Error(&apos;Not found&apos;))
+    })
+
+    serverless.service.custom.myVariable = `\${aws:${scope}:test-name:TEST_KEY}`
+    expect(serverless.variables.populateService).to.throw(Error)
+  }
+
+  it(&apos;should pass through non-AWS variables&apos;, async () =&gt; {
+    const serverless = createFakeServerless()
+    serverless.service.custom.myVar = DEFAULT_VALUE
+    await serverless.variables.populateService()
+    assert.equal(serverless.service.custom.myVar, DEFAULT_VALUE)
+  })
+
+  for (const service of Object.keys(CONFIGS)) {
+    it(`should resolve ${service}`, () =&gt; { testResolve(CONFIGS[service]) })
+    it(`should throw for ${service} not found`, () =&gt; { testNotFound(CONFIGS[service]) })
+  }
+
+  it(&apos;should throw for keys that are not present&apos;, () =&gt; {
+    const serverless = createFakeServerless()
+
+    AWS.mock(&apos;Kinesis&apos;, &apos;describeStream&apos;, (params, callback) =&gt; {
+      callback(null, { StreamDescription: { StreamARN: DEFAULT_VALUE } })
+    })
+
+    serverless.service.custom.foo = &apos;${aws:kinesis:test-stream:BAD_KEY}&apos; // eslint-disable-line
+    expect(serverless.variables.populateService).to.throw(Error)
+  })
+})
+</code></pre>
+
+</div>
+
+<footer class="footer">
+  Generated by <a href="https://esdoc.org">ESDoc<span data-ice="esdocVersion">(0.5.2)</span><img src="./image/esdoc-logo-mini-black.png"></a>
+</footer>
+
+<script src="script/search_index.js"></script>
+<script src="script/search.js"></script>
+<script src="script/pretty-print.js"></script>
+<script src="script/inherited-summary.js"></script>
+<script src="script/test-summary.js"></script>
+<script src="script/inner-link.js"></script>
+<script src="script/patch-for-local.js"></script>
+</body>
+</html>
